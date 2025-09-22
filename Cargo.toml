@@ -1,0 +1,12 @@
+[package]
+name = "rotating-signer-provider"
+version = "0.1.0"
+edition = "2021"
+description = "A signer provider that accepts your 'legacy' existing SignerProvider, then allows adding new SignerProviders with different keys and signing procedures, so you can, over time, rotate keys as you reopen channels."
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+lightning = "0.0.121"  # This is the rust-lightning/LDK crate
+tempfile = "3.8.1"     # Official Rust wrapper around mkstemp
+bitcoin = "0.30.2"     # Same version as used by LDK 0.0.121
+secp256k1 = "0.27.0"   # Same version as used by LDK 0.0.121
