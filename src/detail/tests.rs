@@ -3,9 +3,9 @@ use bitcoin::blockdata::transaction::Transaction;
 use bitcoin::locktime::absolute::LockTime;
 use bitcoin::{OutPoint, ScriptBuf};
 use lightning::ln::chan_utils::{ChannelPublicKeys, ChannelTransactionParameters};
-use lightning::ln::{PaymentPreimage, PaymentHash};
+use lightning_types::payment::{PaymentHash, PaymentPreimage};
 use lightning::ln::channel_keys::{RevocationBasepoint, DelayedPaymentBasepoint, HtlcBasepoint};
-use lightning::ln::features::{ChannelFeatures, ChannelTypeFeatures};
+use lightning_types::features::{ChannelFeatures, ChannelTypeFeatures};
 use lightning::ln::msgs::UnsignedChannelAnnouncement;
 use lightning::routing::gossip::NodeId;
 use lightning::sign::ChannelDerivationParameters;
@@ -54,16 +54,16 @@ impl MockSigner {
 }
 
 impl ChannelSigner for MockSigner {
-    fn get_per_commitment_point(&self, _idx: u64, _secp_ctx: &Secp256k1<secp256k1::All>) -> PublicKey {
-        self.pubkeys.funding_pubkey  // Just return funding pubkey
+    fn get_per_commitment_point(&self, _idx: u64, _secp_ctx: &Secp256k1<secp256k1::All>) -> Result<PublicKey, ()> {
+        Ok(self.pubkeys.funding_pubkey)  // Just return funding pubkey
     }
 
-    fn release_commitment_secret(&self, idx: u64) -> [u8; 32] {
+    fn release_commitment_secret(&self, idx: u64) -> Result<[u8; 32], ()> {
         let mut secret = [0u8; 32];
         for i in 0..32 {
             secret[i] = idx as u8 + i as u8;  // Deterministic but obvious pattern
         }
-        secret
+        Ok(secret)
     }
 
     fn validate_holder_commitment(
@@ -203,6 +203,23 @@ impl EcdsaChannelSigner for MockSigner {
         let sig_bytes = Self::invert_bytes(&[0x42; 64]);
         Ok(Signature::from_compact(&sig_bytes[..64]).unwrap())
     }
+
+    fn sign_splicing_funding_input(
+        &self,
+        tx: &Transaction,
+        input_index: usize,
+        input_value: u64,
+        _secp_ctx: &Secp256k1<secp256k1::All>,
+    ) -> Result<Signature, ()> {
+        self.sign_counter.fetch_add(1, Ordering::SeqCst);
+        // Use transaction bytes + input_index + input_value for deterministic "signature"
+        let mut input_bytes = Vec::new();
+        input_bytes.extend_from_slice(tx.compute_txid().as_ref());
+        input_bytes.extend_from_slice(&input_index.to_le_bytes());
+        input_bytes.extend_from_slice(&input_value.to_le_bytes());
+        let sig_bytes = Self::invert_bytes(&input_bytes);
+        Ok(Signature::from_compact(&sig_bytes[..64]).unwrap())
+    }
 }
 
 #[test]
@@ -229,7 +246,7 @@ fn test_wrapped_channel_signer_delegates_all_operations() {
 
     // Create a dummy transaction to sign
     let tx = Transaction {
-        version: 2,
+        version: bitcoin::transaction::Version(2),
         lock_time: LockTime::ZERO,
         input: Vec::new(),
         output: Vec::new(),
@@ -259,7 +276,7 @@ fn test_wrapped_channel_signer_delegates_all_operations() {
     let secp = Secp256k1::new();
     // Create test transaction parameters - just set up enough for the test to work
     let tx = Transaction {
-        version: 2,
+        version: bitcoin::transaction::Version(2),
         lock_time: LockTime::ZERO,
         input: Vec::new(),
         output: Vec::new(),
@@ -277,7 +294,7 @@ fn test_wrapped_channel_signer_delegates_all_operations() {
             selected_contest_delay: 42,
         }),
         funding_outpoint: Some(funding_outpoint),
-        channel_type_features: lightning::ln::features::ChannelTypeFeatures::empty(),
+        channel_type_features: ChannelTypeFeatures::empty(),
     };
     // Set late parameters to allow as_holder_broadcastable to work
     base_params.funding_outpoint = Some(funding_outpoint);
@@ -416,8 +433,14 @@ fn test_wrapped_channel_signer_delegates_all_operations() {
         mock_ref.sign_channel_announcement_with_funding_key(&msg, &secp)
     );
 
-    // Verify all operations were delegated (12 operations)
-    assert_eq!(counter.load(Ordering::SeqCst), 12);
+    // Test sign_splicing_funding_input
+    assert_eq!(
+        wrapped.sign_splicing_funding_input(&tx, 0, 1000, &secp),
+        mock_ref.sign_splicing_funding_input(&tx, 0, 1000, &secp)
+    );
+
+    // Verify all operations were delegated (13 operations)
+    assert_eq!(counter.load(Ordering::SeqCst), 13);
 }
 
 #[test]

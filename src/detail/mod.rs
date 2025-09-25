@@ -7,11 +7,10 @@ use lightning::ln::chan_utils::{
 };
 use lightning::ln::msgs::UnsignedChannelAnnouncement;
 use lightning::ln::script::ShutdownScript;
-use lightning::ln::PaymentPreimage;
+use lightning_types::payment::PaymentPreimage;
 use lightning::ln::msgs::DecodeError;
 use lightning::sign::{ChannelSigner, EntropySource, HTLCDescriptor, SignerProvider};
-use lightning::sign::ecdsa::{EcdsaChannelSigner, WriteableEcdsaChannelSigner};
-use lightning::util::ser::{Writeable, Writer};
+use lightning::sign::ecdsa::EcdsaChannelSigner;
 use secp256k1::{PublicKey, SecretKey, Secp256k1};
 
 use std::sync::Mutex;
@@ -40,11 +39,11 @@ impl WrappedChannelSigner {
 }
 
 impl ChannelSigner for WrappedChannelSigner {
-    fn get_per_commitment_point(&self, idx: u64, secp_ctx: &Secp256k1<secp256k1::All>) -> PublicKey {
+    fn get_per_commitment_point(&self, idx: u64, secp_ctx: &Secp256k1<secp256k1::All>) -> Result<PublicKey, ()> {
         self.inner.get_per_commitment_point(idx, secp_ctx)
     }
 
-    fn release_commitment_secret(&self, idx: u64) -> [u8; 32] {
+    fn release_commitment_secret(&self, idx: u64) -> Result<[u8; 32], ()> {
         self.inner.release_commitment_secret(idx)
     }
 
@@ -166,15 +165,19 @@ impl EcdsaChannelSigner for WrappedChannelSigner {
     ) -> Result<Signature, ()> {
         self.inner.sign_channel_announcement_with_funding_key(msg, secp_ctx)
     }
-}
 
-impl Writeable for WrappedChannelSigner {
-    fn write<W: Writer>(&self, _: &mut W) -> Result<(), std::io::Error> {
-        panic!("WrappedChannelSigner::write should never be called in LDK 0.0.121");
+    fn sign_splicing_funding_input(
+        &self,
+        tx: &Transaction,
+        input_index: usize,
+        input_value: u64,
+        secp_ctx: &Secp256k1<secp256k1::All>,
+    ) -> Result<Signature, ()> {
+        self.inner.sign_splicing_funding_input(tx, input_index, input_value, secp_ctx)
     }
 }
 
-impl WriteableEcdsaChannelSigner for WrappedChannelSigner {}
+
 
 /// Type-erased SignerProvider trait that allows storing different SignerProvider
 /// implementations in the same collection.

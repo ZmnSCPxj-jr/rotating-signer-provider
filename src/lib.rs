@@ -85,10 +85,10 @@ use lightning::ln::chan_utils::{
 };
 use lightning::ln::msgs::{DecodeError, UnsignedChannelAnnouncement};
 use lightning::ln::script::ShutdownScript;
-use lightning::ln::PaymentPreimage;
+use lightning_types::payment::PaymentPreimage;
 use lightning::sign::{ChannelSigner, EntropySource, HTLCDescriptor, SignerProvider};
-use lightning::sign::ecdsa::{EcdsaChannelSigner, WriteableEcdsaChannelSigner};
-use lightning::util::ser::{Writeable, Writer};
+use lightning::sign::ecdsa::EcdsaChannelSigner;
+
 use secp256k1::{PublicKey, SecretKey, Secp256k1};
 use std::collections::HashMap;
 
@@ -101,7 +101,7 @@ pub use persistence::{PersistentChannelKeyIdMap, FilesystemChannelKeyIdMap};
 
 /// The concrete channel signer type returned by [`RotatingSignerProvider`].
 ///
-/// `RotatingChannelSigner` is a standard implementation of [`WriteableEcdsaChannelSigner`]
+/// `RotatingChannelSigner` is a standard implementation of [`EcdsaChannelSigner`]
 /// as required by LDK. It wraps the actual signer implementation from your underlying
 /// [`SignerProvider`] instances and handles the routing between different providers
 /// transparently.
@@ -114,7 +114,6 @@ pub use persistence::{PersistentChannelKeyIdMap, FilesystemChannelKeyIdMap};
 /// This type implements all the standard LDK signer traits:
 /// - [`ChannelSigner`]
 /// - [`EcdsaChannelSigner`]
-/// - [`WriteableEcdsaChannelSigner`]
 pub struct RotatingChannelSigner {
     inner: detail::WrappedChannelSigner,
 }
@@ -126,11 +125,11 @@ impl RotatingChannelSigner {
 }
 
 impl ChannelSigner for RotatingChannelSigner {
-    fn get_per_commitment_point(&self, idx: u64, secp_ctx: &Secp256k1<secp256k1::All>) -> PublicKey {
+    fn get_per_commitment_point(&self, idx: u64, secp_ctx: &Secp256k1<secp256k1::All>) -> Result<PublicKey, ()> {
         self.inner.get_per_commitment_point(idx, secp_ctx)
     }
 
-    fn release_commitment_secret(&self, idx: u64) -> [u8; 32] {
+    fn release_commitment_secret(&self, idx: u64) -> Result<[u8; 32], ()> {
         self.inner.release_commitment_secret(idx)
     }
 
@@ -247,15 +246,19 @@ impl EcdsaChannelSigner for RotatingChannelSigner {
     ) -> Result<Signature, ()> {
         self.inner.sign_channel_announcement_with_funding_key(msg, secp_ctx)
     }
-}
 
-impl Writeable for RotatingChannelSigner {
-    fn write<W: Writer>(&self, writer: &mut W) -> Result<(), std::io::Error> {
-        self.inner.write(writer)
+    fn sign_splicing_funding_input(
+        &self,
+        tx: &Transaction,
+        input_index: usize,
+        input_value: u64,
+        secp_ctx: &Secp256k1<secp256k1::All>,
+    ) -> Result<Signature, ()> {
+        self.inner.sign_splicing_funding_input(tx, input_index, input_value, secp_ctx)
     }
 }
 
-impl WriteableEcdsaChannelSigner for RotatingChannelSigner {}
+
 
 /// A unique identifier for a SignerProvider instance.
 ///
